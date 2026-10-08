@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- レシートの紙と、送信の矢印 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,30h32v46l-4,-3l-4,3l-4,-3l-4,3l-4,-3l-4,3l-4,-3l-4,3z" />
+    <path
+        android:fillColor="#2E4057"
+        android:pathData="M43,38h22v3h-22z M43,45h22v3h-22z M43,52h14v3h-14z" />
+    <path
+        android:fillColor="#F2B84B"
+        android:pathData="M60,58l14,-8v5h8v6h-8v5z" />
+</vector>

@@ -1,0 +1,20 @@
+# Gradle / Android Studio
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 動作確認に使ったレシートの写真は個人情報を含むので入れない
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
