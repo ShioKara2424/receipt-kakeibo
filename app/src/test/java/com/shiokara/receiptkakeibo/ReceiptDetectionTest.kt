@@ -5,6 +5,7 @@ import com.shiokara.receiptkakeibo.parse.OcrText
 import com.shiokara.receiptkakeibo.parse.Orientation
 import com.shiokara.receiptkakeibo.parse.ReceiptDetector
 import com.shiokara.receiptkakeibo.scan.Settings
+import com.shiokara.receiptkakeibo.scan.SheetPrompt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -88,5 +89,20 @@ class ReceiptDetectionTest {
         assertFalse(Settings.isValidChatUrl("https://claude.ai/share/abc"))
         assertFalse(Settings.isValidChatUrl("claude.ai/chat/abc"))
         assertFalse(Settings.isValidChatUrl(""))
+    }
+
+    @Test
+    fun スプレッドシートのURLを確認する() {
+        assertTrue(Settings.isValidSheetUrl("https://docs.google.com/spreadsheets/d/1AbC_dEf-123/edit#gid=0"))
+        assertFalse(Settings.isValidSheetUrl("https://docs.google.com/document/d/1AbC/edit"))
+        assertFalse(Settings.isValidSheetUrl(""))
+    }
+
+    @Test
+    fun 指示文にスプレッドシートのURLを埋め込む() {
+        val url = "https://docs.google.com/spreadsheets/d/1AbC/edit"
+        val text = SheetPrompt.build(SheetPrompt.DEFAULT, " $url ")
+        assertTrue(text.contains(url))
+        assertFalse(text.contains(SheetPrompt.PLACEHOLDER))
     }
 }

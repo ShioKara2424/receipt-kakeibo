@@ -9,7 +9,9 @@ import com.shiokara.receiptkakeibo.data.ReceiptDatabase
 import com.shiokara.receiptkakeibo.scan.ClaudeLauncher
 import com.shiokara.receiptkakeibo.scan.Notifier
 import com.shiokara.receiptkakeibo.scan.ReceiptScanner
+import com.shiokara.receiptkakeibo.scan.SendMode
 import com.shiokara.receiptkakeibo.scan.Settings
+import com.shiokara.receiptkakeibo.scan.SheetPrompt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,12 +31,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val receipts: StateFlow<List<DetectedReceipt>> =
         dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val sendMode = MutableStateFlow(settings.sendMode)
+    val sheetUrl = MutableStateFlow(settings.sheetUrl)
+    val sheetPrompt = MutableStateFlow(settings.sheetPrompt)
     val chatUrl = MutableStateFlow(settings.chatUrl)
     val setupPrompt = MutableStateFlow(settings.setupPrompt)
     val scanning = MutableStateFlow(false)
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val messages: SharedFlow<String> = _messages
+
+    fun setSendMode(mode: SendMode) {
+        settings.sendMode = mode
+        sendMode.value = mode
+    }
+
+    fun saveSheetUrl(url: String) {
+        settings.sheetUrl = url
+        sheetUrl.value = settings.sheetUrl
+        _messages.tryEmit(
+            if (Settings.isValidSheetUrl(settings.sheetUrl)) "スプレッドシートを保存しました"
+            else "Google スプレッドシートの URL を入力してください",
+        )
+    }
+
+    fun saveSheetPrompt(text: String) {
+        settings.sheetPrompt = text
+        sheetPrompt.value = text
+        _messages.tryEmit(
+            if (text.contains(SheetPrompt.PLACEHOLDER)) "指示文を保存しました"
+            else "指示文を保存しました({シートURL} がないので、シートの URL は入りません)",
+        )
+    }
+
+    fun resetSheetPrompt() {
+        settings.sheetPrompt = SheetPrompt.DEFAULT
+        sheetPrompt.value = settings.sheetPrompt
+    }
+
+    /** スプレッドシートをブラウザ (またはスプレッドシートのアプリ) で開く */
+    fun openSheet() {
+        val url = settings.sheetUrl
+        if (!Settings.isValidSheetUrl(url)) {
+            _messages.tryEmit("先にスプレッドシートの URL を設定してください")
+            return
+        }
+        runCatching {
+            getApplication<Application>().startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
 
     fun saveChatUrl(url: String) {
         settings.chatUrl = url
@@ -109,26 +157,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send(receipt: DetectedReceipt) {
-        val app = getApplication<Application>()
-        Notifier.cancel(app, receipt.mediaId)
-        when (ClaudeLauncher.send(app, receipt.imagePath, settings.chatUrl)) {
-            ClaudeLauncher.Result.NO_CHAT_URL -> _messages.tryEmit("先に送り先のチャットを設定してください")
-            ClaudeLauncher.Result.FAILED -> _messages.tryEmit("チャットを開けませんでした。「共有」から送ってください")
-            else -> {
-                _messages.tryEmit("画像をコピーしました。入力欄で貼り付けて送信してください")
-                markSent(receipt)
-            }
-        }
-    }
+    fun send(receipt: DetectedReceipt) = send(listOf(receipt))
 
-    fun share(receipts: List<DetectedReceipt>) {
+    /** 設定した送り方で送る。スプレッドシート方式なら複数枚をまとめて送れる */
+    fun send(receipts: List<DetectedReceipt>) {
         if (receipts.isEmpty()) return
         val app = getApplication<Application>()
-        ClaudeLauncher.share(app, receipts.map { it.imagePath })
-        receipts.forEach {
-            Notifier.cancel(app, it.mediaId)
-            markSent(it)
+        val result = ClaudeLauncher.sendReceipts(app, receipts.map { it.imagePath }, settings)
+        _messages.tryEmit(result.message)
+        if (result.done) {
+            // チャット方式は 1 枚ずつしか渡せないので、渡せた 1 枚だけを送信済みにする
+            val sent = if (settings.sendMode == SendMode.CHAT) receipts.take(1) else receipts
+            sent.forEach {
+                Notifier.cancel(app, it.mediaId)
+                markSent(it)
+            }
         }
     }
 

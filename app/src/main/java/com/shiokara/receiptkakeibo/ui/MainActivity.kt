@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -37,6 +38,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -58,6 +60,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,7 +72,9 @@ import com.shiokara.receiptkakeibo.scan.ClaudeLauncher
 import com.shiokara.receiptkakeibo.scan.ImageTools
 import com.shiokara.receiptkakeibo.scan.Permissions
 import com.shiokara.receiptkakeibo.scan.ScanScheduler
+import com.shiokara.receiptkakeibo.scan.SendMode
 import com.shiokara.receiptkakeibo.scan.Settings
+import com.shiokara.receiptkakeibo.scan.SheetPrompt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -98,6 +103,8 @@ private fun MainScreen(vm: MainViewModel) {
     val context = LocalContext.current
     val receipts by vm.receipts.collectAsStateWithLifecycle()
     val chatUrl by vm.chatUrl.collectAsStateWithLifecycle()
+    val sheetUrl by vm.sheetUrl.collectAsStateWithLifecycle()
+    val sendMode by vm.sendMode.collectAsStateWithLifecycle()
     val scanning by vm.scanning.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -148,8 +155,14 @@ private fun MainScreen(vm: MainViewModel) {
                 }
             }
 
-            item { ChatUrlCard(chatUrl = chatUrl, onSave = vm::saveChatUrl, onOpen = vm::openChat) }
-            item { SetupPromptCard(vm) }
+            item { SendModeCard(sendMode, vm::setSendMode) }
+            if (sendMode == SendMode.SHEET) {
+                item { SheetUrlCard(sheetUrl = sheetUrl, onSave = vm::saveSheetUrl, onOpen = vm::openSheet) }
+                item { SheetPromptCard(vm) }
+            } else {
+                item { ChatUrlCard(chatUrl = chatUrl, onSave = vm::saveChatUrl, onOpen = vm::openChat) }
+                item { SetupPromptCard(vm) }
+            }
 
             if (!batteryOk && !batteryHintDismissed) {
                 item {
@@ -183,8 +196,8 @@ private fun MainScreen(vm: MainViewModel) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("未送信のレシート(${unsent.size})", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    if (unsent.size >= 2) {
-                        TextButton(onClick = { vm.share(unsent) }) { Text("まとめて共有") }
+                    if (unsent.size >= 2 && sendMode == SendMode.SHEET) {
+                        TextButton(onClick = { vm.send(unsent) }) { Text("まとめて送る") }
                     }
                 }
             }
@@ -198,7 +211,7 @@ private fun MainScreen(vm: MainViewModel) {
                 }
             }
             items(unsent, key = { it.mediaId }) { r ->
-                ReceiptCard(r, onSend = { vm.send(r) }, onShare = { vm.share(listOf(r)) }, onDelete = { vm.delete(r) })
+                ReceiptCard(r, onSend = { vm.send(r) }, onDelete = { vm.delete(r) })
             }
 
             if (sent.isNotEmpty()) {
@@ -206,7 +219,7 @@ private fun MainScreen(vm: MainViewModel) {
                     Text("送信済み(30日で自動削除)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
                 }
                 items(sent, key = { it.mediaId }) { r ->
-                    ReceiptCard(r, onSend = { vm.send(r) }, onShare = { vm.share(listOf(r)) }, onDelete = { vm.delete(r) })
+                    ReceiptCard(r, onSend = { vm.send(r) }, onDelete = { vm.delete(r) })
                 }
             }
         }
@@ -220,6 +233,100 @@ private fun StepCard(title: String, body: String, actions: @Composable () -> Uni
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(body, style = MaterialTheme.typography.bodyMedium)
             actions()
+        }
+    }
+}
+
+@Composable
+private fun SendModeCard(mode: SendMode, onChange: (SendMode) -> Unit) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("送り方", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            ModeOption(
+                selected = mode == SendMode.SHEET,
+                title = "スプレッドシートに追記(おすすめ)",
+                body = "画像と指示文を Claude アプリに渡し、Google スプレッドシートに追記してもらいます。毎回新しいチャットになります。",
+                onClick = { onChange(SendMode.SHEET) },
+            )
+            ModeOption(
+                selected = mode == SendMode.CHAT,
+                title = "決めたチャットに貼り付け",
+                body = "画像をコピーして決めたチャットを開きます。入力欄で貼り付けて送信します。",
+                onClick = { onChange(SendMode.CHAT) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModeOption(selected: Boolean, title: String, body: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun SheetUrlCard(sheetUrl: String, onSave: (String) -> Unit, onOpen: () -> Unit) {
+    var text by rememberSaveable(sheetUrl) { mutableStateOf(sheetUrl) }
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("家計簿のスプレッドシート", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "Google スプレッドシートの URL(https://docs.google.com/spreadsheets/d/…)を貼り付けてください。Claude アプリでは、チャットの「+」→ コネクタで Google Sheets をオンにしておいてください。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("スプレッドシートのURL") },
+                singleLine = true,
+                isError = text.isNotBlank() && !Settings.isValidSheetUrl(text),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onSave(text) }, enabled = text != sheetUrl) { Text("保存") }
+                OutlinedButton(onClick = onOpen, enabled = Settings.isValidSheetUrl(sheetUrl)) { Text("シートを開く") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetPromptCard(vm: MainViewModel) {
+    val prompt by vm.sheetPrompt.collectAsStateWithLifecycle()
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var draft by rememberSaveable(prompt) { mutableStateOf(prompt) }
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("画像と一緒に渡す指示文", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "送るたびにこの指示文を添えます。「${SheetPrompt.PLACEHOLDER}」の部分は、設定したスプレッドシートの URL に置き換わります。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (editing) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp, max = 400.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { vm.saveSheetPrompt(draft); editing = false }) { Text("保存") }
+                    TextButton(onClick = { draft = prompt; editing = false }) { Text("やめる") }
+                    TextButton(onClick = { vm.resetSheetPrompt(); editing = false }) { Text("初期値に戻す") }
+                }
+            } else {
+                OutlinedButton(onClick = { editing = true }) { Text("編集") }
+            }
         }
     }
 }
@@ -302,7 +409,7 @@ private fun ActionsRow(scanning: Boolean, onScan: () -> Unit, onScanDay: () -> U
 }
 
 @Composable
-private fun ReceiptCard(receipt: DetectedReceipt, onSend: () -> Unit, onShare: () -> Unit, onDelete: () -> Unit) {
+private fun ReceiptCard(receipt: DetectedReceipt, onSend: () -> Unit, onDelete: () -> Unit) {
     val thumb by produceState<ImageBitmap?>(null, receipt.imagePath) {
         value = withContext(Dispatchers.IO) { ImageTools.thumbnail(receipt.imagePath)?.asImageBitmap() }
     }
@@ -328,7 +435,6 @@ private fun ReceiptCard(receipt: DetectedReceipt, onSend: () -> Unit, onShare: (
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Button(onClick = onSend) { Text(if (receipt.sentAt == null) "送る" else "再送") }
-                    TextButton(onClick = onShare) { Text("共有") }
                     TextButton(onClick = onDelete) { Text("削除") }
                 }
             }

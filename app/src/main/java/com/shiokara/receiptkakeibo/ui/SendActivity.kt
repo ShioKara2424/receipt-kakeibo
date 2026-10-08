@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 
 /**
  * 通知をタップしたときに動く、画面を持たない中継役。
- * 画像をクリップボードに用意して Claude のチャットを開き、すぐに閉じる。
+ * 設定した送り方で Claude にレシートを渡し、すぐに閉じる。
  */
 class SendActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,16 +28,12 @@ class SendActivity : ComponentActivity() {
                 return@launch
             }
             Notifier.cancel(this@SendActivity, mediaId)
-            val settings = Settings(this@SendActivity)
-            when (ClaudeLauncher.send(this@SendActivity, receipt.imagePath, settings.chatUrl)) {
-                ClaudeLauncher.Result.OPENED_IN_APP, ClaudeLauncher.Result.OPENED_IN_BROWSER -> {
-                    dao.markSent(mediaId, System.currentTimeMillis())
-                    Toast.makeText(this@SendActivity, "画像をコピーしました。入力欄で貼り付けて送信してください", Toast.LENGTH_LONG).show()
-                }
-                ClaudeLauncher.Result.NO_CHAT_URL, ClaudeLauncher.Result.FAILED -> {
-                    Toast.makeText(this@SendActivity, "送り先のチャットを設定してください", Toast.LENGTH_LONG).show()
-                    startActivity(Intent(this@SendActivity, MainActivity::class.java))
-                }
+            val result = ClaudeLauncher.sendReceipts(this@SendActivity, listOf(receipt.imagePath), Settings(this@SendActivity))
+            Toast.makeText(this@SendActivity, result.message, Toast.LENGTH_LONG).show()
+            if (result.done) {
+                dao.markSent(mediaId, System.currentTimeMillis())
+            } else {
+                startActivity(Intent(this@SendActivity, MainActivity::class.java))
             }
             finish()
         }

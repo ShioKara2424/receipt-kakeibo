@@ -51,7 +51,10 @@ object Notifier {
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("レシートを見つけました")
-            .setContentText("タップすると Claude のチャットを開きます。入力欄で貼り付けて送信してください")
+            .setContentText(
+                if (Settings(context).sendMode == SendMode.SHEET) "タップすると Claude に画像と指示文を渡します"
+                else "タップすると Claude のチャットを開きます。入力欄で貼り付けて送信してください",
+            )
             .setContentIntent(send)
             .setAutoCancel(true)
             .addAction(0, "Claudeに送る", send)
