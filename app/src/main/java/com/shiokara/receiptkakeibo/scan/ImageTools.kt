@@ -16,8 +16,10 @@ object ImageTools {
     /** 写真を読み込み、撮影時の向き情報 (EXIF) に合わせて回転し、長辺 [maxEdge] 以下に縮小する */
     fun load(context: Context, uri: Uri, maxEdge: Int = MAX_EDGE): Bitmap? {
         val resolver = context.contentResolver
+        // 大きさだけを先に調べる (この呼び出しは画像を作らず常に null を返すので、戻り値は見ない)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+        val stream = resolver.openInputStream(uri) ?: return null
+        stream.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
         var sample = 1

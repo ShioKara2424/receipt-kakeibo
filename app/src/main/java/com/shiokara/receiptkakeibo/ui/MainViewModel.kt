@@ -75,8 +75,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             scanning.value = true
             try {
-                val found = scanner.scanNew(lookBackHours)
-                _messages.emit(if (found > 0) "レシートを ${found} 枚見つけました" else "新しいレシートはありませんでした")
+                val r = scanner.scanNew(lookBackHours)
+                _messages.emit(
+                    when {
+                        r.noPermission -> "写真へのアクセスが許可されていません"
+                        r.checked == 0 -> "新しい写真はありませんでした"
+                        else -> buildString {
+                            append("写真 ${r.checked} 枚を確認し、レシートを ${r.found} 枚見つけました")
+                            if (r.failed > 0) append("(${r.failed} 枚は読み込めませんでした)")
+                        }
+                    },
+                )
             } catch (e: Exception) {
                 _messages.emit("写真の確認に失敗しました: ${e.message}")
             } finally {
@@ -92,6 +101,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val receipt = scanner.addManually(uri)
                 if (receipt == null) _messages.emit("写真を読み込めませんでした") else send(receipt)
+            } catch (e: Exception) {
+                _messages.emit("写真を処理できませんでした: ${e.message}")
             } finally {
                 scanning.value = false
             }

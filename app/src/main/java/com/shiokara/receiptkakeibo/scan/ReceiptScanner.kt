@@ -40,9 +40,9 @@ class ReceiptScanner(context: Context) {
      * @param lookBackHours 0 より大きければ、前回の位置に関係なくこの時間分さかのぼって調べる
      * @return 新しく見つけたレシートの数
      */
-    suspend fun scanNew(lookBackHours: Int = 0): Int = mutex.withLock {
+    suspend fun scanNew(lookBackHours: Int = 0): ScanSummary = mutex.withLock {
         withContext(Dispatchers.IO) {
-            if (!Permissions.hasPhotoAccess(context)) return@withContext 0
+            if (!Permissions.hasPhotoAccess(context)) return@withContext ScanSummary(0, 0, 0, noPermission = true)
             val nowSec = System.currentTimeMillis() / 1000
             val since = if (lookBackHours > 0) nowSec - lookBackHours * 3600L
             // 保存処理中だった写真を取りこぼさないよう、少しさかのぼる (調べ済みの写真は飛ばす)
@@ -50,13 +50,23 @@ class ReceiptScanner(context: Context) {
 
             val photos = queryCameraPhotos(since)
             var found = 0
+            var checked = 0
+            var failed = 0
             val recognizer = newRecognizer()
             try {
                 for (photo in photos) {
-                    if (dao.isProcessed(photo.id)) continue
-                    val receipt = runCatching { examine(recognizer, photo) }
-                        .onFailure { Log.w(TAG, "写真 ${photo.id} を調べられませんでした", it) }
-                        .getOrNull()
+                    // 手動でさかのぼるときは、レシートでないと判定した写真も調べ直す
+                    val skip = if (lookBackHours > 0) dao.isKnownReceipt(photo.id) else dao.isProcessed(photo.id)
+                    if (skip) continue
+                    checked++
+                    val result = runCatching { examine(recognizer, photo) }
+                    if (result.isFailure) {
+                        // 読み込めなかった写真は「調べ済み」にせず、次の確認でもう一度試す
+                        Log.w(TAG, "写真 ${photo.id} を調べられませんでした", result.exceptionOrNull())
+                        failed++
+                        continue
+                    }
+                    val receipt = result.getOrNull()
                     dao.markProcessed(ProcessedImage(photo.id, receipt != null))
                     if (receipt != null) {
                         dao.upsert(receipt)
@@ -70,9 +80,11 @@ class ReceiptScanner(context: Context) {
             val newest = photos.maxOfOrNull { it.dateAddedSec } ?: 0L
             if (newest > settings.lastScanSec) settings.lastScanSec = newest
             cleanUpOld()
-            found
+            ScanSummary(checked = checked, found = found, failed = failed)
         }
     }
+
+    data class ScanSummary(val checked: Int, val found: Int, val failed: Int, val noPermission: Boolean = false)
 
     /** ギャラリーから手で選んだ写真を、判定なしでレシートとして登録する (向きの補正だけ行う) */
     suspend fun addManually(uri: Uri): DetectedReceipt? = withContext(Dispatchers.IO) {
@@ -92,7 +104,8 @@ class ReceiptScanner(context: Context) {
     }
 
     private suspend fun examine(recognizer: TextRecognizer, photo: Photo): DetectedReceipt? {
-        val bitmap = ImageTools.load(context, photo.uri) ?: return null
+        val bitmap = ImageTools.load(context, photo.uri)
+            ?: throw java.io.IOException("写真を読み込めませんでした: ${photo.uri}")
         val best = correctOrientation(recognizer, bitmap)
         if (!ReceiptDetector.detect(OcrText.toRows(best.lines)).isReceipt) return null
 

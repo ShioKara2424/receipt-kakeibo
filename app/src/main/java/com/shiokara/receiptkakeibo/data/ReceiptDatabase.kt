@@ -56,6 +56,9 @@ interface ReceiptDao {
     @Query("SELECT EXISTS(SELECT 1 FROM processed_images WHERE mediaId = :mediaId)")
     suspend fun isProcessed(mediaId: Long): Boolean
 
+    @Query("SELECT EXISTS(SELECT 1 FROM processed_images WHERE mediaId = :mediaId AND isReceipt = 1)")
+    suspend fun isKnownReceipt(mediaId: Long): Boolean
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun markProcessed(image: ProcessedImage)
 }
