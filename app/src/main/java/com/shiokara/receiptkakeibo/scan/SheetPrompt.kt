@@ -9,7 +9,7 @@ object SheetPrompt {
     const val PLACEHOLDER = "{シートURL}"
 
     val DEFAULT = """
-        添付したレシートを読み取り、Google Sheets コネクタで次の家計簿スプレッドシートに追記してください。
+        このファイルと一緒に添付したレシートの画像を読み取り、Google Sheets コネクタで次の家計簿スプレッドシートに追記してください。
         $PLACEHOLDER
 
         # 追記のしかた
